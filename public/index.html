@@ -34,7 +34,7 @@
       <h2 id="signin-h">Sign in</h2>
       <form id="signin-form">
         <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="16">
+        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="15">
         <button type="submit">Sign in</button>
         <p class="error" id="signin-error" role="alert"></p>
       </form>
@@ -55,7 +55,7 @@
           <h2 id="ai-h">What to change</h2>
           <button type="button" id="ai-run">Read my numbers</button>
         </div>
-        <div id="ai-body"><p class="muted">Claude reads every source for this range and lists what to change, biggest win first. It takes about a minute and is kept for the day.</p></div>
+        <div id="ai-body"><p class="muted">An AI model reads every source for this range and lists what to change, biggest win first. It takes a minute or two and is kept for the day.</p></div>
       </section>
 
       <section aria-labelledby="trend-h">
@@ -118,24 +118,24 @@
 
       <ol class="steps">
         <li>
-          <h3>Deploy and set a password</h3>
-          <p>Run these from the repo folder. The password needs 16 or more characters.</p>
-          <pre><code>npm install
-npx wrangler deploy --domain analytics.example.com
+          <h3>Set the password</h3>
+          <p>If you can read this page, the Worker is already deployed. Open a terminal in the <code>analytics-desk</code> folder you deployed from (the one with <code>wrangler.toml</code>) and run every command on this page there. Run from anywhere else, Wrangler creates a new, unrelated Worker.</p>
+          <pre><code>cd analytics-desk
 npx wrangler secret put DASHBOARD_PASSWORD</code></pre>
-          <p>Every later setting can go in one file: copy <code>.dev.vars.example</code> to <code>.dev.vars</code>, fill it in, then run <code>npx wrangler secret bulk .dev.vars</code>.</p>
+          <p>The password needs 15 or more characters. Every later setting can go in one file: copy <code>.dev.vars.example</code> to <code>.dev.vars</code>, fill it in, then run <code>npx wrangler secret bulk .dev.vars</code>.</p>
         </li>
         <li>
           <h3>Say what the site is for</h3>
           <p><code>SITE_NAME</code>, <code>SITE_URL</code> (the address people visit), <code>TIMEZONE</code> (for example <code>America/New_York</code>), and <code>SITE_GOAL</code>: one sentence on what a good visit ends with. The AI read judges everything against it.</p>
         </li>
         <li>
-          <h3>Umami (visits, paths, clicks)</h3>
+          <h3>Cloudflare Web Analytics (visits, pages, speed; free)</h3>
           <ol>
-            <li>In Umami, open Settings, then API keys, then Create key. Copy it into <code>UMAMI_API_KEY</code>.</li>
-            <li>Open Settings, then Websites, then Edit on your site. Copy the Website ID into <code>UMAMI_WEBSITE_ID</code>.</li>
-            <li>Self-hosted only: set <code>UMAMI_API_URL</code> to <code>https://your-umami-host/api</code>.</li>
+            <li>Turn on Web Analytics for the site in Cloudflare if it is off.</li>
+            <li>In Cloudflare, open My Profile, then API Tokens, then Create Token, then Custom token. Give it one permission: Account, Account Analytics, Read. Copy it into <code>CF_API_TOKEN</code>.</li>
+            <li>Copy your Account ID (Workers and Pages overview, right-hand column) into <code>CF_ACCOUNT_ID</code>. The Worker filters to the hostname in <code>SITE_URL</code>.</li>
           </ol>
+          <p>Cloudflare keeps about 1 page load in 10 and multiplies up, so small numbers are rough. It does not record paths through the site, exit pages or button presses; Umami (step 7) does.</p>
         </li>
         <li>
           <h3>Google Search Console (Google searches)</h3>
@@ -158,16 +158,18 @@ npx wrangler secret put GSC_SITE</code></pre>
           </ol>
         </li>
         <li>
-          <h3>Cloudflare Web Analytics (speed)</h3>
-          <ol>
-            <li>Turn on Web Analytics for the site in Cloudflare if it is off.</li>
-            <li>In Cloudflare, open My Profile, then API Tokens, then Create Token, then Custom token. Give it one permission: Account, Account Analytics, Read. Copy it into <code>CF_API_TOKEN</code>.</li>
-            <li>Copy your Account ID (Workers and Pages overview, right-hand column) into <code>CF_ACCOUNT_ID</code>. The Worker filters to the hostname in <code>SITE_URL</code>.</li>
-          </ol>
+          <h3>The AI read (free)</h3>
+          <p>Nothing to set. It runs on Workers AI in your own Cloudflare account, which gives 10,000 free units ("neurons") a day; one read of a month uses about 150 to 500. On the Workers Free plan it stops at the cap instead of billing. Each read is kept for the day.</p>
+          <p>Optional, paid: for a sharper read, create a key at platform.claude.com and put it in <code>ANTHROPIC_API_KEY</code>. The read then uses Claude, about 10 to 25 cents each. <code>AI_MODEL</code> picks the model; a name starting with <code>@cf/</code> stays on Workers AI.</p>
         </li>
         <li>
-          <h3>The AI read (Claude)</h3>
-          <p>Create a key at console.anthropic.com under API keys and put it in <code>ANTHROPIC_API_KEY</code>. One read of a month of data costs a few cents; each read is kept for the day. <code>AI_MODEL</code> overrides the default model.</p>
+          <h3>Umami (optional: paths, exit pages, button presses)</h3>
+          <p>Umami Cloud's free plan has no API, so it cannot feed this page; the API starts at its Pro plan. Self-hosted Umami includes the API for free. With Umami connected, visits and pages come from it instead of Cloudflare.</p>
+          <ol>
+            <li>In Umami, open Settings, then API keys, then Create key. Copy it into <code>UMAMI_API_KEY</code>.</li>
+            <li>Open Settings, then Websites, then Edit on your site. Copy the Website ID into <code>UMAMI_WEBSITE_ID</code>.</li>
+            <li>Self-hosted only: set <code>UMAMI_API_URL</code> to <code>https://your-umami-host/api</code>.</li>
+          </ol>
         </li>
       </ol>
     </section>

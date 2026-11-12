@@ -7,7 +7,8 @@ import assert from 'node:assert/strict'
 globalThis.caches = { default: { match: async () => undefined, put: async () => {} } }
 
 const { default: worker } = await import('../src/index.js')
-const { timeWindow, bingTime, rollup, umamiTotals, buildReport } = await import('../src/sources.js')
+const { timeWindow, bingTime, rollup, umamiTotals, buildReport, cloudflareShape } = await import('../src/sources.js')
+const { aiChoice, readInsights, tidy } = await import('../src/ai.js')
 
 const env = { DASHBOARD_PASSWORD: 'correct horse battery staple' }
 const ctx = { waitUntil: () => {} }
@@ -79,6 +80,35 @@ assert.equal(flat.prev.visitors, 10)
 const nested = umamiTotals({ pageviews: { value: 50, prev: 40 }, visitors: { value: 20, prev: 10 }, visits: { value: 25, prev: 20 }, bounces: { value: 10, prev: 5 }, totaltime: { value: 2500, prev: 1000 } })
 assert.deepEqual(nested, flat, 'old and new Umami shapes give the same numbers')
 assert.equal(umamiTotals({ visits: 0 }).bounceRate, null, 'no visits: no rate, no divide by zero')
+
+// ---- Cloudflare reply → the Umami-like shape the page draws
+const cfw = timeWindow(7, now, 'America/New_York')
+const g = (dim, value, count, visits) => ({ count, sum: { visits }, dimensions: { [dim]: value } })
+const cf = cloudflareShape({
+  total: [{ count: 50, sum: { visits: 30 } }],
+  hours: [g('datetimeHour', '2026-11-12T03:00:00Z', 10, 10), g('datetimeHour', '2026-11-12T15:00:00Z', 20, 10)], // 10 pm on the 11th, then the 12th, in New York
+  referrers: [g('refererHost', '', 20, 20), g('refererHost', 'www.example.com', 30, 0), g('refererHost', 't.co', 10, 10)],
+  entry: [g('requestPath', '/', 20, 20)],
+}, cfw, 'www.example.com')
+assert.deepEqual(cf.totals, { pageLoads: 50, visits: 30, prev: { pageLoads: 0, visits: 0 } }, 'no reply for the period before counts as zero')
+assert.deepEqual(cf.daily.at(-2), { date: '2026-11-11', visits: 10, pageviews: 10 }, 'UTC hours land on the site’s own date')
+assert.deepEqual(cf.daily.at(-1), { date: '2026-11-12', visits: 10, pageviews: 20 })
+assert.deepEqual(cf.referrers.map((x) => x.name), ['', 't.co'], 'the site itself is not a referrer')
+assert.deepEqual(cf.entry, [{ name: '/', count: 20 }])
+assert.deepEqual(cf.speed, [])
+
+// ---- the AI read: free by default, Claude with a key, model JSON cleaned before the page sees it
+assert.equal(aiChoice({ AI: {} }).provider, 'Workers AI')
+assert.equal(aiChoice({ AI: {}, ANTHROPIC_API_KEY: 'k' }).provider, 'Claude')
+assert.equal(aiChoice({ AI: {}, ANTHROPIC_API_KEY: 'k', AI_MODEL: '@cf/x/y' }).provider, 'Workers AI', '@cf/ names stay on Workers AI')
+assert.deepEqual(aiChoice({ AI_MODEL: 'claude-x' }).missing, ['ANTHROPIC_API_KEY'])
+assert.deepEqual(tidy({ summary: ['a', 3, null], actions: [{ title: 't', impact: 9 }] }).actions[0], { title: 't', why: '', change: '', where: '', impact: '', effort: '' })
+const fakeAI = { run: async () => ({ choices: [{ message: { content: 'Here you go:\n```json\n{"headline":"h","summary":["s"]}\n```' } }] }) }
+const read = await readInsights({ AI: fakeAI }, { days: 7, from: 'a', to: 'b', site: {}, sources: {} })
+assert.equal(read.headline, 'h', 'JSON is found inside fences and chatter')
+assert.deepEqual(read.actions, [], 'missing lists come back empty, not undefined')
+const garbled = { run: async () => ({ choices: [{ message: { content: '{"headline": "h",\n\n\n' } }] }) }
+await assert.rejects(readInsights({ AI: garbled }, { days: 7, site: {}, sources: {} }), /could not be read/)
 
 // ---- a failing source reports its error and does not take the others down
 const quiet = console.error

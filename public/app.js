@@ -66,7 +66,17 @@ function sv(tag, attrs = {}, ...kids) {
 }
 
 const ok = (s) => s?.status === 'ok'
-const offText = (id, s) => (s?.status === 'error' ? `${NAMES[id]} failed: ${s.error}` : `Connect ${NAMES[id]} to see this.`)
+const offText = (id, s) =>
+  s?.status === 'error' ? `${NAMES[id]} failed: ${s.error}`
+    : id === 'umami' ? "Needs Umami's API (setup step 7). Cloudflare doesn't record this."
+      : `Connect ${NAMES[id]} to see this.`
+
+// Visits, pages and referrers come from Umami when its API is connected, else from Cloudflare (free, sampled).
+function traffic(r) {
+  const { umami: u, cloudflare: c } = r.sources
+  if (ok(u) || (!ok(c) && u?.status === 'error')) return { id: 'umami', s: u }
+  return { id: 'cloudflare', s: c }
+}
 
 async function api(url, body) {
   const init = body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
@@ -108,7 +118,7 @@ function showSignin(passwordSet) {
   $('setup-status').replaceChildren()
   const form = $('signin-form')
   for (const f of form.elements) f.disabled = !passwordSet
-  $('signin-error').textContent = passwordSet ? '' : 'No password set yet. Follow step 1 of the setup below, then reload this page.'
+  $('signin-error').textContent = passwordSet ? '' : 'No usable password yet: it is missing or shorter than 15 characters. Follow step 1 of the setup below, then reload this page.'
   if (passwordSet) $('password').focus()
 }
 
@@ -196,7 +206,8 @@ function render(r) {
 }
 
 function banner(r) {
-  const off = Object.entries(r.sources).filter(([, s]) => s.status === 'off').map(([id]) => NAMES[id])
+  // With Cloudflare connected, Umami is an extra rather than a gap, so it doesn't nag here.
+  const off = Object.entries(r.sources).filter(([id, s]) => s.status === 'off' && !(id === 'umami' && ok(r.sources.cloudflare))).map(([id]) => NAMES[id])
   const bad = Object.entries(r.sources).filter(([, s]) => s.status === 'error')
   const b = $('banner')
   b.hidden = !off.length && !bad.length
@@ -229,6 +240,13 @@ function totals(r) {
       tile({ label: 'Time per visit', value: secs(x.avgVisitSeconds), delta: change(x.avgVisitSeconds, p.avgVisitSeconds, { fmt: secs }), src: 'Umami' }),
     )
     lede.push(`${num(x.visitors)} people made ${num(x.visits)} visits and viewed ${num(x.pageviews)} pages.`)
+  } else if (ok(c)) {
+    const x = c.totals, p = x.prev
+    t.push(
+      tile({ label: 'Visits', value: num(x.visits), delta: change(x.visits, p.visits), src: 'Cloudflare, about 1 in 10 sampled' }),
+      tile({ label: 'Page views', value: num(x.pageLoads), delta: change(x.pageLoads, p.pageLoads), src: 'Cloudflare, about 1 in 10 sampled' }),
+    )
+    lede.push(`about ${num(x.visits)} visits and ${num(x.pageLoads)} page views. Cloudflare counts 1 load in 10 and multiplies up, so small numbers are rough.`)
   }
   if (ok(g)) {
     const x = g.totals, p = x.prev
@@ -246,7 +264,7 @@ function totals(r) {
       tile({ label: 'Seen in Bing', value: num(x.impressions), delta: change(x.impressions, p.impressions), src: 'Bing, impressions' }),
     )
   }
-  if (ok(c)) t.push(tile({ label: 'Page loads', value: num(c.totals.pageLoads), src: 'Cloudflare' }))
+  if (ok(c) && ok(u)) t.push(tile({ label: 'Page loads', value: num(c.totals.pageLoads), src: 'Cloudflare' }))
   $('tiles').replaceChildren(...t)
   $('totals-lede').textContent = lede.length ? `In the last ${r.days} days: ${lede.join(' ')}` : 'Connect a source to see totals.'
 }
@@ -254,15 +272,15 @@ function totals(r) {
 // Line chart drawn at the box's real width, so text stays its true size at any zoom.
 function drawTrend(r) {
   const box = $('trend')
-  const u = r.sources.umami
+  const t = traffic(r)
   box.replaceChildren()
   $('trend-table').replaceChildren()
-  if (!ok(u)) {
-    box.append(el('p', { class: 'empty', text: offText('umami', u) }))
+  if (!ok(t.s)) {
+    box.append(el('p', { class: 'empty', text: offText(t.id, t.s) }))
     $('trend-lede').textContent = ''
     return
   }
-  const rows = u.daily
+  const rows = t.s.daily
   const vals = rows.map((d) => d.visits)
   const peak = vals.indexOf(Math.max(...vals))
   const total = vals.reduce((a, b) => a + b, 0)
@@ -364,27 +382,30 @@ function flow(r) {
     j.steps.forEach((s, i) => steps.append(...(i ? [el('span', { class: 'arrow', 'aria-label': 'then', text: '→' })] : []), el('span', { class: 'step', text: s })))
     ol.append(el('li', {}, steps, el('p', { class: 'count', text: `${num(j.count)} visits took this path` })))
   }
-  bars('entry', u, 'umami', u?.entry)
+  const t = traffic(r)
+  bars('entry', t.s, t.id, t.s?.entry)
   bars('exit', u, 'umami', u?.exit)
   if (ok(u) && u.entry[0] && u.exit[0]) {
     const top = u.journeys[0]
     $('flow-lede').textContent = `Most visits start on ${u.entry[0].name} and end on ${u.exit[0].name}.` +
       (top ? ` The most common path is ${top.steps.join(' then ')} (${num(top.count)} visits).` : '')
-  } else $('flow-lede').textContent = ''
+  } else $('flow-lede').textContent = ok(t.s) && t.s.entry[0] ? `Most visits start on ${t.s.entry[0].name}.` : ''
 }
 
 function pages(r) {
   const u = r.sources.umami
-  bars('pages', u, 'umami', u?.pages)
+  const t = traffic(r)
+  bars('pages', t.s, t.id, t.s?.pages)
   bars('events', u, 'umami', u?.events, { empty: 'No tracked clicks yet. Add data-umami-event to the links you care about.' })
 }
 
 function sources(r) {
   const u = r.sources.umami
+  const t = traffic(r)
   bars('channels', u, 'umami', u?.channels, { label: (x) => words(x.name) || '(unknown)' })
-  bars('referrers', u, 'umami', u?.referrers, { label: (x) => x.name || '(direct or unknown)' })
-  bars('countries', u, 'umami', u?.countries, { label: (x) => country(x.name) })
-  bars('devices', u, 'umami', u?.devices, { label: (x) => words(x.name) || '(unknown)' })
+  bars('referrers', t.s, t.id, t.s?.referrers, { label: (x) => x.name || '(direct or unknown)' })
+  bars('countries', t.s, t.id, t.s?.countries, { label: (x) => country(x.name) })
+  bars('devices', t.s, t.id, t.s?.devices, { label: (x) => words(x.name) || '(unknown)' })
 }
 
 function tableOf(rows, cols) {
@@ -437,7 +458,7 @@ function speed(r) {
     tile({ label: 'Layout jumps', value: dec(v.cls, 2), delta: `${words(cls)}. Good is under 0.1.`, src: 'Cumulative Layout Shift', flag: cls === 'poor' }),
   )
   $('speed-lede').textContent = `${num(c.totals.pageLoads)} page loads, ${num(v.samples)} with speed data. Each figure is the 75th percentile: three in four loads were this fast or faster.`
-  const rows = c.pages.slice().sort((a, b) => (b.lcpMs ?? -1) - (a.lcpMs ?? -1))
+  const rows = c.speed.slice().sort((a, b) => (b.lcpMs ?? -1) - (a.lcpMs ?? -1))
   if (!rows.length) return box.append(el('p', { class: 'empty', text: 'No speed samples in this range.' }))
   box.append(tableOf(rows, [
     { h: 'Page', v: (x) => x.name },
@@ -466,8 +487,8 @@ function renderSetup() {
       return row(s.name, 'Connected', 'on', null)
     }),
     setup.ai.missing.length
-      ? row('AI read (Claude)', 'Not connected', '', 'Missing ANTHROPIC_API_KEY')
-      : row('AI read (Claude)', 'Connected', 'on', `Model ${setup.ai.model}`),
+      ? row(`AI read (${setup.ai.provider})`, 'Not connected', '', `Missing ${setup.ai.missing.join(', ')}`)
+      : row(`AI read (${setup.ai.provider})`, 'Connected', 'on', `Model ${setup.ai.model}${setup.ai.provider === 'Workers AI' ? ', free daily allowance' : ''}`),
   )
 }
 
@@ -477,8 +498,8 @@ async function readAI() {
   const btn = $('ai-run')
   const range = days
   btn.disabled = true
-  btn.textContent = 'Reading, about a minute…'
-  $('ai-body').replaceChildren(el('p', { class: 'muted', text: `Claude is reading every connected source for the last ${range} days.` }))
+  btn.textContent = 'Reading, a minute or two…'
+  $('ai-body').replaceChildren(el('p', { class: 'muted', text: `Reading every connected source for the last ${range} days.` }))
   try {
     ai[range] = await api('/api/insights', { days: range, fresh: !!ai[range] })
   } catch (e) {
@@ -497,7 +518,7 @@ function renderAI() {
   if (!btn.disabled) btn.textContent = a ? 'Read again' : 'Read my numbers'
   const body = $('ai-body')
   if (!a) {
-    return body.replaceChildren(el('p', { class: 'muted', text: 'Claude reads every source for this range and lists what to change, biggest win first. It takes about a minute, and the read is kept for the rest of the day.' }))
+    return body.replaceChildren(el('p', { class: 'muted', text: 'An AI model reads every source for this range and lists what to change, biggest win first. It takes a minute or two, and the read is kept for the rest of the day.' }))
   }
   const notes = [['How people move', a.flow], ['Search', a.search], ['Speed', a.speed]].filter(([, t]) => t)
   body.replaceChildren(
