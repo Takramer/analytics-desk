@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Analytics desk</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to the numbers</a>
+
+  <header class="top">
+    <div class="brand">
+      <p class="eyebrow">Analytics desk</p>
+      <h1 id="site-name">Your site</h1>
+    </div>
+    <nav class="controls" id="controls" hidden aria-label="Range and actions">
+      <div class="seg" role="group" aria-label="Date range">
+        <button type="button" data-days="7">7 days</button>
+        <button type="button" data-days="30">30 days</button>
+        <button type="button" data-days="90">90 days</button>
+      </div>
+      <button type="button" id="refresh">Refresh</button>
+      <a href="#setup" class="btn">Setup</a>
+      <button type="button" id="signout">Sign out</button>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section id="signin" class="card narrow" hidden aria-labelledby="signin-h">
+      <h2 id="signin-h">Sign in</h2>
+      <form id="signin-form">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="16">
+        <button type="submit">Sign in</button>
+        <p class="error" id="signin-error" role="alert"></p>
+      </form>
+    </section>
+
+    <div id="desk" hidden>
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+      <p class="banner" id="banner" hidden></p>
+
+      <section aria-labelledby="totals-h">
+        <h2 id="totals-h">The short version</h2>
+        <p class="lede" id="totals-lede"></p>
+        <div class="tiles" id="tiles"></div>
+      </section>
+
+      <section class="card ai" aria-labelledby="ai-h">
+        <div class="row">
+          <h2 id="ai-h">What to change</h2>
+          <button type="button" id="ai-run">Read my numbers</button>
+        </div>
+        <div id="ai-body"><p class="muted">Claude reads every source for this range and lists what to change, biggest win first. It takes about a minute and is kept for the day.</p></div>
+      </section>
+
+      <section aria-labelledby="trend-h">
+        <h2 id="trend-h">Visits per day</h2>
+        <p class="lede" id="trend-lede"></p>
+        <div class="chart" id="trend"></div>
+        <details class="table-view"><summary>Show as a table</summary><div id="trend-table"></div></details>
+      </section>
+
+      <section aria-labelledby="flow-h">
+        <h2 id="flow-h">How people move through the site</h2>
+        <p class="lede" id="flow-lede"></p>
+        <div class="grid">
+          <div class="card"><h3>Most common paths</h3><ol class="paths" id="journeys"></ol></div>
+          <div class="card"><h3>Where visits start</h3><ol class="bars" id="entry"></ol></div>
+          <div class="card"><h3>Where visits end</h3><ol class="bars" id="exit"></ol></div>
+        </div>
+      </section>
+
+      <section aria-labelledby="pages-h">
+        <h2 id="pages-h">What they read and press</h2>
+        <div class="grid">
+          <div class="card"><h3>Pages, by views</h3><ol class="bars" id="pages"></ol></div>
+          <div class="card"><h3>Links and buttons pressed</h3><ol class="bars" id="events"></ol></div>
+        </div>
+      </section>
+
+      <section aria-labelledby="from-h">
+        <h2 id="from-h">Where they come from</h2>
+        <div class="grid">
+          <div class="card"><h3>Channels</h3><ol class="bars" id="channels"></ol></div>
+          <div class="card"><h3>Referring sites</h3><ol class="bars" id="referrers"></ol></div>
+          <div class="card"><h3>Countries</h3><ol class="bars" id="countries"></ol></div>
+          <div class="card"><h3>Devices</h3><ol class="bars" id="devices"></ol></div>
+        </div>
+      </section>
+
+      <section aria-labelledby="search-h">
+        <h2 id="search-h">Search: Google and Bing</h2>
+        <p class="lede" id="search-lede"></p>
+        <div class="grid wide">
+          <div class="card"><h3>Google searches</h3><div id="g-queries"></div></div>
+          <div class="card"><h3>Bing searches</h3><div id="b-queries"></div></div>
+          <div class="card"><h3>Google: pages that showed</h3><div id="g-pages"></div></div>
+        </div>
+      </section>
+
+      <section aria-labelledby="speed-h">
+        <h2 id="speed-h">Speed (Cloudflare)</h2>
+        <p class="lede" id="speed-lede"></p>
+        <div class="tiles" id="vitals"></div>
+        <div class="card"><h3>Slowest-loading pages (75th percentile)</h3><div id="speed-pages"></div></div>
+      </section>
+    </div>
+
+    <section id="setup" class="setup" aria-labelledby="setup-h">
+      <h2 id="setup-h">Setup</h2>
+      <p class="lede">Each source is optional. Connect what you use; the rest shows as "not connected". Keys live as Worker secrets, never in the page or the repo.</p>
+      <div id="setup-status"></div>
+
+      <ol class="steps">
+        <li>
+          <h3>Deploy and set a password</h3>
+          <p>Run these from the repo folder. The password needs 16 or more characters.</p>
+          <pre><code>npm install
+npx wrangler deploy --domain analytics.example.com
+npx wrangler secret put DASHBOARD_PASSWORD</code></pre>
+          <p>Every later setting can go in one file: copy <code>.dev.vars.example</code> to <code>.dev.vars</code>, fill it in, then run <code>npx wrangler secret bulk .dev.vars</code>.</p>
+        </li>
+        <li>
+          <h3>Say what the site is for</h3>
+          <p><code>SITE_NAME</code>, <code>SITE_URL</code> (the address people visit), <code>TIMEZONE</code> (for example <code>America/New_York</code>), and <code>SITE_GOAL</code>: one sentence on what a good visit ends with. The AI read judges everything against it.</p>
+        </li>
+        <li>
+          <h3>Umami (visits, paths, clicks)</h3>
+          <ol>
+            <li>In Umami, open Settings, then API keys, then Create key. Copy it into <code>UMAMI_API_KEY</code>.</li>
+            <li>Open Settings, then Websites, then Edit on your site. Copy the Website ID into <code>UMAMI_WEBSITE_ID</code>.</li>
+            <li>Self-hosted only: set <code>UMAMI_API_URL</code> to <code>https://your-umami-host/api</code>.</li>
+          </ol>
+        </li>
+        <li>
+          <h3>Google Search Console (Google searches)</h3>
+          <ol>
+            <li>In Google Cloud Console, create a project (or pick one), open APIs and Services, and enable the Google Search Console API.</li>
+            <li>Open IAM and Admin, then Service accounts, then Create service account. No roles needed. On the new account, open Keys, Add key, JSON. A file downloads.</li>
+            <li>In Search Console, open Settings, then Users and permissions, then Add user. Paste the service account's email (the <code>client_email</code> in the file) with Restricted permission.</li>
+            <li>Upload the file and name the property, then delete the file:
+              <pre><code>npx wrangler secret put GSC_SERVICE_ACCOUNT &lt; key.json
+npx wrangler secret put GSC_SITE</code></pre>
+              <code>GSC_SITE</code> is <code>sc-domain:example.com</code> for a domain property, or the full URL with the trailing slash for a URL-prefix property.</li>
+          </ol>
+        </li>
+        <li>
+          <h3>Bing Webmaster Tools (Bing searches)</h3>
+          <ol>
+            <li>If your site is not in Bing yet, add it there; "Import from Google Search Console" does it in one step.</li>
+            <li>Open Settings (the gear), then API access, then API key, and generate one. Copy it into <code>BING_API_KEY</code>.</li>
+            <li>Set <code>BING_SITE</code> to the site exactly as Bing lists it, for example <code>https://www.example.com/</code>.</li>
+          </ol>
+        </li>
+        <li>
+          <h3>Cloudflare Web Analytics (speed)</h3>
+          <ol>
+            <li>Turn on Web Analytics for the site in Cloudflare if it is off.</li>
+            <li>In Cloudflare, open My Profile, then API Tokens, then Create Token, then Custom token. Give it one permission: Account, Account Analytics, Read. Copy it into <code>CF_API_TOKEN</code>.</li>
+            <li>Copy your Account ID (Workers and Pages overview, right-hand column) into <code>CF_ACCOUNT_ID</code>. The Worker filters to the hostname in <code>SITE_URL</code>.</li>
+          </ol>
+        </li>
+        <li>
+          <h3>The AI read (Claude)</h3>
+          <p>Create a key at console.anthropic.com under API keys and put it in <code>ANTHROPIC_API_KEY</code>. One read of a month of data costs a few cents; each read is kept for the day. <code>AI_MODEL</code> overrides the default model.</p>
+        </li>
+      </ol>
+    </section>
+  </main>
+
+  <div class="tip" id="tip" role="tooltip" hidden></div>
+</body>
+</html>

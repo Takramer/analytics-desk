@@ -1,0 +1,37 @@
+# Copy to .dev.vars, fill in what you have, then upload with: npx wrangler secret bulk .dev.vars
+# Anything left empty shows as "not connected" on the Setup tab. Never commit .dev.vars.
+
+# Required. 16+ characters. Changing it signs every session out.
+DASHBOARD_PASSWORD=
+
+# About the site. SITE_URL is the address people visit, e.g. https://www.example.com
+SITE_NAME=
+SITE_URL=
+# One sentence the AI uses to judge what matters, e.g. "Get design leads to open a case study and email me."
+SITE_GOAL=
+# IANA time zone for daily numbers, e.g. America/New_York. Defaults to UTC.
+TIMEZONE=
+
+# Umami: Settings > API keys. Website ID: Settings > Websites > Edit.
+UMAMI_API_KEY=
+UMAMI_WEBSITE_ID=
+# Only for self-hosted Umami, e.g. https://umami.example.com/api
+UMAMI_API_URL=
+
+# Google Search Console: the whole service-account JSON key on one line, and the property,
+# e.g. sc-domain:example.com (domain property) or https://www.example.com/ (URL-prefix property).
+# Easier: npx wrangler secret put GSC_SERVICE_ACCOUNT < key.json
+GSC_SERVICE_ACCOUNT=
+GSC_SITE=
+
+# Bing Webmaster Tools: Settings > API access > API key. BING_SITE exactly as Bing lists it.
+BING_API_KEY=
+BING_SITE=
+
+# Cloudflare Web Analytics: an API token with Account > Account Analytics > Read, and your account ID.
+CF_API_TOKEN=
+CF_ACCOUNT_ID=
+
+# AI read. Optional AI_MODEL overrides the default Claude model.
+ANTHROPIC_API_KEY=
+AI_MODEL=

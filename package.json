@@ -1,0 +1,22 @@
+{
+  "name": "analytics-desk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Umami, Google Search Console, Bing Webmaster Tools and Cloudflare Web Analytics on one password-protected page, with an AI read of what to change. Runs on one Cloudflare Worker.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "node test/check.mjs && wrangler deploy --dry-run --outdir dist"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.161.0"
+  }
+}
