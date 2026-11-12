@@ -12,6 +12,6 @@ Include what you found, how to reproduce it, and what an attacker could do with 
 
 ## Your part when you deploy
 
-- Use a password of 16 or more characters that you use nowhere else, or one you already keep for a sibling admin page.
+- Use a password of 15 or more characters that you use nowhere else, or one you already keep for a sibling admin page.
 - Give the Cloudflare token only **Account Analytics: Read**, and the Google service account only **Restricted** access to one property.
 - Never commit `.dev.vars` or a Google key file. `.gitignore` already excludes both.

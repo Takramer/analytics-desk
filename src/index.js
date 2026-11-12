@@ -76,13 +76,13 @@ async function cached(req, ctx, key, ttl, fresh, make) {
 }
 
 // ---- auth: one password (DASHBOARD_PASSWORD) and an HMAC-signed cookie. Changing the password signs everyone out.
-// ponytail: the rate limiter counts per Cloudflare location (5 tries a minute); a 16+ character password is what
+// ponytail: the rate limiter counts per Cloudflare location (5 tries a minute); a 15+ character password is what
 // actually stops guessing. Add a D1 table of failed tries if you ever want a hard lockout.
 
-const passwordOk = (env) => (env.DASHBOARD_PASSWORD || '').length >= 16
+const passwordOk = (env) => (env.DASHBOARD_PASSWORD || '').length >= 15
 
 async function login(req, env) {
-  if (!passwordOk(env)) fail(500, 'DASHBOARD_PASSWORD is not set (16+ characters). See the setup guide.')
+  if (!passwordOk(env)) fail(500, 'DASHBOARD_PASSWORD is missing or shorter than 15 characters. See the setup guide.')
   const ip = req.headers.get('cf-connecting-ip') || 'local'
   if (env.LOGIN_LIMIT && !(await env.LOGIN_LIMIT.limit({ key: `login:${ip}` })).success) fail(429, 'Too many tries. Wait a minute.')
   const { password } = await req.json()
