@@ -1,15 +1,27 @@
-// The AI read: the merged report goes to Claude, which answers in a fixed JSON shape the page can lay out.
+// The AI read: the merged report goes to a model, which answers in a fixed JSON shape the page can lay out.
+// Free by default (Workers AI on your own Cloudflare account); Claude when ANTHROPIC_API_KEY is set.
 
 import Anthropic from '@anthropic-ai/sdk'
 
-export const DEFAULT_MODEL = 'claude-opus-5-5'
+export const CLAUDE_MODEL = 'claude-opus-5-5'
+export const WORKERS_MODEL = '@cf/google/gemma-4-26b-a4b-it'
+
+// AI_MODEL picks the model; a name starting with "@" is a Workers AI model.
+export function aiChoice(env) {
+  const m = env.AI_MODEL || ''
+  return m.startsWith('@') || (!m && !env.ANTHROPIC_API_KEY)
+    ? { provider: 'Workers AI', model: m || WORKERS_MODEL, missing: env.AI ? [] : ['the AI binding in wrangler.toml'] }
+    : { provider: 'Claude', model: m || CLAUDE_MODEL, missing: env.ANTHROPIC_API_KEY ? [] : ['ANTHROPIC_API_KEY'] }
+}
 
 const SYSTEM = `You read website analytics for the person who owns the site and tell them what to change.
 They are not an analyst. Write plain English in short sentences. Name real pages, searches and numbers from the data.
+Plain text only: no Markdown, asterisks or backticks; the page shows your words exactly as written.
 Rules:
 - Every claim must rest on a number in the data. Never invent a trend.
 - Small samples are normal for small sites. Under about 100 visits in the period, or under about 20 on one page, say the sample is small and hedge. Never call 3 versus 5 a trend.
 - Umami counts people and paths. Google and Bing count searches, which happen before a visit. Cloudflare counts page loads and speed. They will not match; do not treat the gap as an error unless it is very large.
+- Cloudflare keeps about 1 page load in 10 and multiplies up, so its counts move in steps of about 10. A Cloudflare count under 50 is a handful of real loads: never read a trend into it. Its "entry" list is where visits start.
 - Core Web Vitals at p75: LCP under 2500 ms is good, over 4000 ms is poor. INP under 200 ms is good, over 500 ms is poor. CLS under 0.1 is good, over 0.25 is poor.
 - Prefer changes the owner can make this week: copy, links, page order, titles and descriptions, image weight. Tie each one to the site's goal when a goal is given.
 - Order actions by expected impact. Give at most 6. Skip "add more tracking" unless a question that matters cannot be answered without it.`
@@ -46,8 +58,43 @@ const SCHEMA = {
 }
 
 export async function readInsights(env, report) {
-  if (!env.ANTHROPIC_API_KEY) throw Object.assign(new Error('Add ANTHROPIC_API_KEY to turn on the AI read. See the setup guide.'), { status: 400 })
-  const model = env.AI_MODEL || DEFAULT_MODEL
+  const ai = aiChoice(env)
+  if (ai.missing.length) throw Object.assign(new Error(`Add ${ai.missing.join(', ')} to turn on the AI read. See the setup guide.`), { status: 400 })
+  const read = ai.provider === 'Claude' ? await claude(env, ai.model, report) : await workersAI(env, ai.model, report)
+  return { ...tidy(read.answer), model: read.model, days: report.days, from: report.from, to: report.to, generatedAt: new Date().toISOString() }
+}
+
+// Free: Workers AI on the account the Worker runs on, 10,000 neurons a day. One read of 30 days costs a few hundred.
+async function workersAI(env, model, report) {
+  // ponytail: no response_format. Gemma's JSON mode padded its answer with blank lines until it ran out of tokens;
+  // the schema in the prompt plus tidy() below holds up. Try response_format again if you switch models.
+  const r = await env.AI.run(model, {
+    messages: [
+      { role: 'system', content: `${SYSTEM}\n\nAnswer with one JSON object and nothing else. It must match this JSON Schema:\n${JSON.stringify(SCHEMA)}` },
+      { role: 'user', content: prompt(report) },
+    ],
+    max_tokens: 8000,
+  })
+  const text = String(r?.choices?.[0]?.message?.content ?? r?.response ?? '')
+  try {
+    return { answer: JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)), model: model.split('/').pop() }
+  } catch {
+    throw Object.assign(new Error('The free model sent an answer that could not be read. Press "Read again".'), { status: 502 })
+  }
+}
+
+// The model's JSON is untrusted: keep only the fields the page draws, as strings, so a missing one can't break it.
+export function tidy(x = {}) {
+  const str = (v) => (typeof v === 'string' ? v : '')
+  const strs = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s) : [])
+  const keys = ['title', 'why', 'change', 'where', 'impact', 'effort']
+  return {
+    headline: str(x.headline), summary: strs(x.summary), flow: str(x.flow), search: str(x.search), speed: str(x.speed), caveats: strs(x.caveats),
+    actions: (Array.isArray(x.actions) ? x.actions : []).slice(0, 6).map((a) => Object.fromEntries(keys.map((k) => [k, str(a?.[k])]))),
+  }
+}
+
+async function claude(env, model, report) {
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 1, timeout: 5 * 60e3 })
   // Server-side fallback re-runs a declined request on another model. Only these models take the parameter.
   const fallback = /^claude-(opus-5|fable-5|sonnet-5-5)/.test(model)
@@ -64,7 +111,7 @@ export async function readInsights(env, report) {
   if (msg.stop_reason === 'refusal') throw Object.assign(new Error('The model declined this request. Try again later.'), { status: 502 })
   if (msg.stop_reason === 'max_tokens') throw Object.assign(new Error('The AI read ran out of room. Try a shorter range.'), { status: 502 })
   const text = msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('')
-  return { ...JSON.parse(text), model: msg.model, days: report.days, from: report.from, to: report.to, generatedAt: new Date().toISOString() }
+  return { answer: JSON.parse(text), model: msg.model }
 }
 
 function prompt(report) {

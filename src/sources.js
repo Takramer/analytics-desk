@@ -1,7 +1,8 @@
 // The four sources. Each one reads its own keys from env; a missing key means "not connected", never an error.
 // Every loader returns plain numbers and short ranked lists, so the page and the AI read see one shape.
+// Visits and pages come from Umami when its API is connected, else from Cloudflare, which is free.
 
-import { DEFAULT_MODEL } from './ai.js'
+import { aiChoice } from './ai.js'
 
 const DAY = 864e5
 
@@ -23,7 +24,7 @@ export function sourceStatus(env) {
   return {
     site: siteInfo(env),
     sources: SOURCES.map((s) => ({ id: s.id, name: s.name, missing: s.needs.filter((k) => !env[k]) })),
-    ai: { missing: env.ANTHROPIC_API_KEY ? [] : ['ANTHROPIC_API_KEY'], model: env.AI_MODEL || DEFAULT_MODEL },
+    ai: aiChoice(env),
   }
 }
 
@@ -199,31 +200,65 @@ export function rollup(rows, limit) {
     .slice(0, limit)
 }
 
-// ---- Cloudflare Web Analytics: page loads and Core Web Vitals (p75), filtered to the site's own hostname
+// ---- Cloudflare Web Analytics (free): visits, pages, referrers, countries, devices and Core Web Vitals (p75),
+// filtered to the site's own hostname. Cloudflare keeps about 1 in 10 page loads and scales the counts up.
+// A "visit" is a page load that came from outside the site, so visits by page are the pages visits start on.
 
 async function cloudflare(env, w) {
   const host = new URL(env.SITE_URL).hostname
-  const filter = `{AND:[{datetime_geq:$s},{datetime_leq:$e},{requestHost:$h}]}`
+  const span = (from, to) => `{AND:[{datetime_geq:$${from}},{datetime_leq:$${to}},{requestHost:$h}]}`
+  const now = span('s', 'e')
+  const loads = (alias, dim, limit, order) =>
+    `${alias}: rumPageloadEventsAdaptiveGroups(filter:${now},limit:${limit},orderBy:[${order}]){count sum{visits} dimensions{${dim}}}`
   const vitals = 'largestContentfulPaintP75 interactionToNextPaintP75 cumulativeLayoutShiftP75'
-  const query = `query($a:string!,$s:Time!,$e:Time!,$h:string!){viewer{accounts(filter:{accountTag:$a}){
-    total: rumPageloadEventsAdaptiveGroups(filter:${filter},limit:1){count sum{visits}}
-    site: rumWebVitalsEventsAdaptiveGroups(filter:${filter},limit:1){count quantiles{${vitals}}}
-    pages: rumWebVitalsEventsAdaptiveGroups(filter:${filter},limit:10,orderBy:[count_DESC]){count dimensions{requestPath} quantiles{${vitals}}}
+  const query = `query($a:string!,$s:Time!,$e:Time!,$ps:Time!,$pe:Time!,$h:string!){viewer{accounts(filter:{accountTag:$a}){
+    total: rumPageloadEventsAdaptiveGroups(filter:${now},limit:1){count sum{visits}}
+    prev: rumPageloadEventsAdaptiveGroups(filter:${span('ps', 'pe')},limit:1){count sum{visits}}
+    ${loads('hours', 'datetimeHour', 5000, 'datetimeHour_ASC')}
+    ${loads('pages', 'requestPath', 15, 'count_DESC')}
+    ${loads('entry', 'requestPath', 10, 'sum_visits_DESC')}
+    ${loads('referrers', 'refererHost', 11, 'sum_visits_DESC')}
+    ${loads('countries', 'countryName', 10, 'sum_visits_DESC')}
+    ${loads('devices', 'deviceType', 10, 'sum_visits_DESC')}
+    site: rumWebVitalsEventsAdaptiveGroups(filter:${now},limit:1){count quantiles{${vitals}}}
+    speed: rumWebVitalsEventsAdaptiveGroups(filter:${now},limit:10,orderBy:[count_DESC]){count dimensions{requestPath} quantiles{${vitals}}}
   }}}`
+  const iso = (t) => new Date(t).toISOString()
   const r = await getJSON('https://api.cloudflare.com/client/v4/graphql', {
     method: 'POST',
     headers: { authorization: `Bearer ${env.CF_API_TOKEN}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ query, variables: { a: env.CF_ACCOUNT_ID, s: new Date(w.startAt).toISOString(), e: new Date(w.endAt).toISOString(), h: host } }),
+    body: JSON.stringify({ query, variables: { a: env.CF_ACCOUNT_ID, s: iso(w.startAt), e: iso(w.endAt), ps: iso(w.prevStartAt), pe: iso(w.startAt - 1), h: host } }),
   })
   if (r.errors?.length) throw new Error(`Cloudflare: ${r.errors[0].message}`)
-  const acc = r.data?.viewer?.accounts?.[0] || {}
-  // Times arrive in microseconds; a negative value means "no data".
+  return cloudflareShape(r.data?.viewer?.accounts?.[0] || {}, w, host)
+}
+
+// The GraphQL reply in the same shape Umami gives, so the page can draw either one.
+export function cloudflareShape(acc, w, host) {
+  const sum = ([g] = []) => ({ pageLoads: g?.count || 0, visits: g?.sum?.visits || 0 })
+  const top = (rows = [], by = 'visits') =>
+    rows.map((g) => ({ name: Object.values(g.dimensions)[0] ?? '', count: by === 'loads' ? g.count : g.sum.visits }))
+  // Hours arrive in UTC; adding them up by the site's own date keeps days in line with Google and Bing.
+  const days = new Map()
+  for (const g of acc.hours || []) {
+    const d = w.ymd(Date.parse(g.dimensions.datetimeHour))
+    const e = days.get(d) || { visits: 0, pageviews: 0 }
+    days.set(d, { visits: e.visits + g.sum.visits, pageviews: e.pageviews + g.count })
+  }
+  // Times arrive in microseconds; a negative value, on any of the three, means "no data".
   const ms = (us) => (us == null || us < 0 ? null : Math.round(us / 1000))
-  const v = (q = {}) => ({ lcpMs: ms(q.largestContentfulPaintP75), inpMs: ms(q.interactionToNextPaintP75), cls: q.cumulativeLayoutShiftP75 ?? null })
+  const shift = (x) => (x == null || x < 0 ? null : x)
+  const v = (q = {}) => ({ lcpMs: ms(q.largestContentfulPaintP75), inpMs: ms(q.interactionToNextPaintP75), cls: shift(q.cumulativeLayoutShiftP75) })
   return {
-    totals: { pageLoads: acc.total?.[0]?.count || 0, visits: acc.total?.[0]?.sum?.visits || 0 },
+    totals: { ...sum(acc.total), prev: sum(acc.prev) },
+    daily: w.dates.map((date) => ({ date, ...(days.get(date) || { visits: 0, pageviews: 0 }) })),
+    pages: top(acc.pages, 'loads'),
+    entry: top(acc.entry),
+    referrers: top(acc.referrers).filter((x) => x.name !== host && x.count).slice(0, 10), // clicks inside the site aren't referrals
+    countries: top(acc.countries),
+    devices: top(acc.devices),
     vitals: { samples: acc.site?.[0]?.count || 0, ...v(acc.site?.[0]?.quantiles) },
-    pages: (acc.pages || []).map((p) => ({ name: p.dimensions.requestPath, samples: p.count, ...v(p.quantiles) })),
+    speed: (acc.speed || []).map((p) => ({ name: p.dimensions.requestPath, samples: p.count, ...v(p.quantiles) })),
   }
 }
 
